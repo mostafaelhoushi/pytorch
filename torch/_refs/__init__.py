@@ -235,6 +235,8 @@ __all__ = [
     "zeros",
     "zeros_like",
     "arange",
+    "linspace",
+    "logspace",
     #
     # Randomness References
     #
@@ -3053,6 +3055,87 @@ def arange(
         )
     else:
         raise AssertionError()
+
+
+@register_decomposition(torch.ops.aten.linspace)
+@out_wrapper()
+def linspace(
+    start: NumberType,
+    end: NumberType,
+    steps: NumberType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: torch.layout = torch.strided,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    assert not isinstance(start, complex)
+    factory_kwargs = {
+        "device": device,
+        # "layout":layout,
+        # "pin_memory":pin_memory,
+        "requires_grad": requires_grad,
+    }
+    if steps == 0:
+        res = torch.full((0,), 0, dtype=dtype, **factory_kwargs)
+    elif steps == 1:
+        res = torch.full((1,), start, dtype=dtype, **factory_kwargs)
+    elif end - start == 0:
+        res = torch.full((steps,), start, dtype=dtype, **factory_kwargs)
+    else:
+        if dtype is not None and (not dtype.is_complex and not dtype.is_floating_point):
+            # Do computation with integers to be more precise
+            step_size_x_denom = end - start
+            eps = 1 if end > start else -1
+            denom = steps - 1
+            tmp = (
+                torch.arange(
+                    start * denom,
+                    end * denom + eps,
+                    step_size_x_denom,
+                    dtype=torch.int64,
+                )
+                / denom
+            )
+            res = prims.to_dtype(tmp, dtype)
+        else:
+            step_size = (end - start) / (steps - 1)
+            eps = step_size / 2
+            tmp = torch.arange(
+                start, end + eps, step_size, **factory_kwargs, dtype=torch.float64
+            )
+            res = prims.to_dtype(tmp, dtype)
+
+    return res
+
+
+@register_decomposition(torch.ops.aten.logspace)
+@out_wrapper()
+def logspace(
+    start: NumberType,
+    end: NumberType,
+    steps: NumberType,
+    base: NumberType = 10,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: torch.layout = torch.strided,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    assert not isinstance(start, complex)
+    ret = torch.linspace(
+        start,
+        end,
+        steps,
+        dtype=torch.float64,
+        device=device,
+        layout=layout,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
+    return prims.to_dtype(torch.pow(base, ret), dtype)
 
 
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints

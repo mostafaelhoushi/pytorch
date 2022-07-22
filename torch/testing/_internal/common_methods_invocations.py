@@ -3074,6 +3074,31 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
             yield SampleInput(start, args=(end, step), kwargs={"dtype": dtype, "device": device})
 
 
+def error_inputs_linspace(op, device, **kwargs):
+    yield ErrorInput(SampleInput(0, args=(3, -1)), error_type=RuntimeError, error_regex='number of steps must be non-negative')
+
+
+def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
+    ends = (0, 1, 4, 50)
+    starts = (0, 1, 4, 50)
+    nsteps = (0, 1, 4, 50)
+    for start, end, nstep in product(starts, ends, nsteps):
+        yield SampleInput(start, args=(end, nstep), kwargs={"dtype": dtype, "device": device})
+
+
+def sample_inputs_logpace(op, device, dtype, requires_grad, **kwargs):
+    ends = (0, 1, 2, 4)
+    starts = (0, 1, 2, 4)
+    n_steps = (0, 1, 2, 4)
+    bases = (1, 3,) if dtype in (torch.int8, torch.uint8) else (None, 1, 3, 5, 10)
+    for start, end, n_step, base in product(starts, ends, n_steps, bases):
+        if start > end:
+            continue
+        if base is None:
+            yield SampleInput(start, args=(end, n_step), kwargs={"dtype": dtype, "device": device})
+        else:
+            yield SampleInput(start, args=(end, n_step, base), kwargs={"dtype": dtype, "device": device})
+
 
 def sample_inputs_isclose(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
@@ -12929,6 +12954,58 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
         )),
+    OpInfo('linspace',
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
+           supports_out=True,
+           supports_autograd=False,
+           # prims.to_dtype can return a view
+           error_inputs_func=error_inputs_linspace,
+           sample_inputs_func=sample_inputs_linspace,
+           skips=(
+               # https://github.com/pytorch/pytorch/issues/81774
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+
+               # Tests that assume input is a tensor or sequence of tensors
+               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+
+               # Same failure as arange: cannot find linspace in captured graph
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+
+               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+           )),
+    OpInfo('logspace',
+           dtypes=all_types_and_complex_and(torch.bfloat16),
+           supports_out=True,
+           supports_autograd=False,
+           # prims.to_dtype can return a view
+           error_inputs_func=error_inputs_linspace,
+           sample_inputs_func=sample_inputs_logpace,
+           skips=(
+               # NOTE: This is an exact copy of xfails for arange except test_out was removed
+
+               # https://github.com/pytorch/pytorch/issues/81774
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+
+               # Tests that assume input is a tensor or sequence of tensors
+               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+
+               # Same failure as arange: cannot find linspace in captured graph
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+
+               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+           )),
     UnaryUfuncInfo('log',
                    ref=np.log,
                    domain=(0, None),
@@ -20382,6 +20459,43 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
         ),
         supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.linspace",
+        torch_opinfo_name="linspace",
+        skips=(
+            # Tests that assume input is a tensor or sequence of tensors
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+            # cpu implementation is wrong https://github.com/pytorch/pytorch/issues/81996
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
+        ),
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({
+                    torch.float16: tol(atol=1e-02, rtol=1e-02)
+                }),
+                'TestCommon', device_type='cpu',
+            ),
+        ),
+        # returns a view of an intermediate tensor (prims.to_dtype)
+        validate_view_consistency=False,
+    ),
+    PythonRefInfo(
+        "_refs.logspace",
+        torch_opinfo_name="logspace",
+        skips=(
+            # Tests that assume input is a tensor or sequence of tensors
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+        ),
+        # returns a view of an intermediate tensor (prims.to_dtype)
+        validate_view_consistency=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.atan",
