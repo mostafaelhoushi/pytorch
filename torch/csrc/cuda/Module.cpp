@@ -445,6 +445,7 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
   result["inactive_split_bytes"] = statArrayToDict(stats.inactive_split_bytes);
   result["oversize_allocations"] = statToDict(stats.oversize_allocations);
   result["oversize_segments"] = statToDict(stats.oversize_segments);
+  result["user_requested_bytes"] = statToDict(stats.user_requested_bytes);
 
   return result.release().ptr();
   END_HANDLE_TH_ERRORS

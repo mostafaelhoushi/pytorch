@@ -96,12 +96,15 @@ struct DeviceStats {
 
   // SIZE: maximum block size that is allowed to be split.
   int64_t max_split_size = 0;
+
+  Stat user_requested_bytes;
 };
 
 // Struct containing info of an allocation block (i.e. a fractional part of a
 // cudaMalloc)..
 struct BlockInfo {
   int64_t size = 0;
+  int64_t user_size = 0;
   int32_t gc_counter = 0;
   bool allocated = false;
   bool active = false;

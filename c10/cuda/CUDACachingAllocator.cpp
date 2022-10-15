@@ -180,6 +180,7 @@ struct Block {
   int event_count; // number of outstanding CUDA events
   int gc_count; // counter for prioritizing older / less useful blocks for
                 // garbage collection
+  int64_t user_size = 0;  // Size of the user allocation handled by this block
 
   Block(
       int device,
@@ -657,6 +658,10 @@ class DeviceCachingAllocator {
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_allocations, 1);
 
+    auto orig_block_size = block->size;
+    update_stat(stats.user_requested_bytes, orig_block_size);
+    block->user_size = 0;
+
     c10::reportMemoryUsageToProfiler(
         block->ptr,
         block->size,
@@ -687,6 +692,9 @@ class DeviceCachingAllocator {
     });
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_allocations, -1);
+
+    update_stat(stats.user_requested_bytes, -block->user_size);
+    block->user_size = orig_block_size;
 
     if (!block->stream_uses.empty()) {
       if (C10_UNLIKELY(captures_underway)) {
@@ -796,6 +804,7 @@ class DeviceCachingAllocator {
     stats.num_ooms = 0;
     reset_accumulated_stat(stats.oversize_allocations);
     reset_accumulated_stat(stats.oversize_segments);
+    reset_accumulated_stat(stats.user_requested_bytes);
   }
 
   /** Resets the historical peak stats for the device **/
@@ -815,6 +824,7 @@ class DeviceCachingAllocator {
     }
     reset_peak_stat(stats.oversize_allocations);
     reset_peak_stat(stats.oversize_segments);
+    reset_peak_stat(stats.user_requested_bytes);
   }
 
   /** Dump a complete snapshot of the memory held by the allocator. Potentially
@@ -841,6 +851,7 @@ class DeviceCachingAllocator {
         BlockInfo& block_info = segment_info.blocks.back();
 
         block_info.size = block->size;
+	block_info.user_size = block->user_size;
         block_info.allocated = block->allocated;
         block_info.active = block->allocated || (block->event_count > 0) ||
             !block->stream_uses.empty();
